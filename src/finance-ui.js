@@ -1,6 +1,6 @@
 'use strict';
 // Runway: safe-to-spend, bills, spending caps, promo deadlines and runway goal.
-// The main process owns finance.json; this window only renders and asks it to save.
+// The host bridge owns storage; this view renders state and requests validated saves.
 (() => {
 const api = window.runway;
 let S = null, loadError = null, view = 'today', saving = Promise.resolve(), capabilities = {};
@@ -25,6 +25,7 @@ const tone = (good, warn) => good ? 'c-good' : warn ? 'c-warn' : 'c-bad';
 const bar = (pct, cls = '') => `<div class="bar"><i class="${cls}" data-w="${Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0)).toFixed(1)}"></i></div>`;
 const cats = () => Object.keys(S.caps);
 const capTotal = () => Object.values(S.caps).reduce((a, b) => a + b, 0);
+const canImport = () => capabilities.imports !== false;
 const monarch = () => S.monarch || { transactions: [], imports: [], accounts: [], recurring: [] };
 const ledger = () => monarch().transactions || [];
 const ledgerMonths = () => [...new Set(ledger().map(t => t.date.slice(0, 7)))].sort().reverse();
@@ -39,7 +40,8 @@ async function save() {
       toast('Not saved');
       loadError = describe(error);
       const fresh = await api.getState().catch(() => null);
-      if (fresh?.state) S = fresh.state;
+      if (fresh && Object.prototype.hasOwnProperty.call(fresh, 'state')) S = fresh.state;
+      if (fresh?.capabilities) capabilities = fresh.capabilities;
       render();
       return false;
     });
@@ -107,9 +109,12 @@ const TABS = [['today', 'Today'], ['bills', 'Bills'], ['spend', 'Spend'], ['mona
 function render() {
   $('#nav').innerHTML = TABS.map(([k, l]) => `<button aria-current="${view === k ? 'page' : 'false'}" data-v="${k}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b => b.onclick = () => { view = b.dataset.v; render(); window.scrollTo(0, 0); });
-  if (!S) { $('#app').innerHTML = `<h1>Runway</h1><div class="banner">${esc(loadError || 'Runway could not open.')}</div>`; return; }
-  $('#app').innerHTML = `<div class="topbar"><p class="tiny">Saved only on this computer</p>${capabilities.openProjects && typeof api.showYah === 'function' ? '<button class="small" id="toYah">Back to projects</button>' : ''}</div>`
-    + (loadError ? `<div class="banner">${esc(loadError)}</div>` : '')
+  if (!S) {
+    $('#app').innerHTML = `<h1>Runway</h1><div class="banner" role="alert">${esc(loadError || 'Runway could not open.')}</div><div class="button-row"><button id="retryLoad">Try again</button>${capabilities.backup && typeof api.restoreBackup === 'function' ? '<button id="backupRestore" class="primary">Restore backup</button>' : ''}</div>`;
+    wire(); return;
+  }
+  $('#app').innerHTML = `<div class="topbar"><p class="tiny">Saved on this device</p>${capabilities.openProjects && typeof api.showYah === 'function' ? '<button class="small" id="toYah">Back to projects</button>' : ''}</div>`
+    + (loadError ? `<div class="banner" role="alert">${esc(loadError)}<button class="small mt8" id="reloadState">Reload saved data</button></div>` : '')
     + ({ today: vToday, bills: vBills, spend: vSpend, monarch: vMonarch, debt: vDebt, goal: vGoal })[view]();
   document.querySelectorAll('.bar i[data-w]').forEach(i => { i.style.width = i.dataset.w + '%'; });
   wire();
@@ -133,20 +138,25 @@ function vToday() {
   const stale = hasBalance && daysUntil(S.settings.checkingAsOf) < -3;
   return `
   <h1>Runway</h1>
-  <p class="sub">Your plan, checked against imported activity.</p>
-  <div class="panel">
-    <div class="tiny">${st.np && hasBalance ? `Estimated available until payday ${fmt(st.np)} (${daysUntil(st.np)} days)` : 'Set up your checking forecast'}</div>
+  <p class="sub">Your money, one day at a time.</p>
+  <div class="panel forecast-hero">
+    <div class="tiny">${st.np && hasBalance ? `Estimated available until ${fmt(st.np)}` : 'Set up your checking forecast'}</div>
     <div class="big ${st.np && hasBalance ? cls : ''}">${st.np && hasBalance ? money(st.amt) : '—'}</div>
-    <div class="note">${st.np && hasBalance ? `Checking ${money(S.settings.checking)} − bills due before payday ${money(st.due)} − ${money(S.settings.buffer)} buffer` : 'Enter your current checking balance, then set paycheck amount, pay days and bills to see an estimate.'}</div>
-    <div class="note">Manual purchases track spending caps only; they do not adjust checking or imported cash flow. Update checking from your account. A balance dated today is assumed to include today's paycheck and rent; add an unpaid same-day item in Bills.</div>
-    <button class="small mt8" data-go="bills">Set income & bills</button>
-    ${stale ? `<div class="note c-warn">Checking balance last updated ${fmt(S.settings.checkingAsOf)}. Update it so this number stays honest.</div>` : ''}
-    <div class="grid2 mt12">
-      <div><label for="chk">Checking balance now</label><input id="chk" type="number" inputmode="decimal" value="${S.settings.checking}"></div>
-      <div><label for="buf">Buffer to never touch</label><input id="buf" type="number" inputmode="decimal" value="${S.settings.buffer}"></div>
+    <p class="note">${hasBalance ? `Checking ${cash(S.settings.checking)} · ${st.np ? `${daysUntil(st.np)} days until payday` : 'Add your income schedule in Bills'}` : 'Start with your balance. Add income and bills when ready.'}</p>
+    ${stale ? `<p class="note c-warn">Balance last updated ${fmt(S.settings.checkingAsOf)}.</p>` : ''}
+    <details class="balance-editor"><summary>${hasBalance ? 'Update checking balance' : 'Enter checking balance'}</summary>
+    <div class="grid2">
+      <div><label for="chk">Checking now</label><input id="chk" type="number" step="0.01" inputmode="decimal" value="${S.settings.checking}"></div>
+      <div><label for="buf">Keep as a buffer</label><input id="buf" type="number" min="0" step="0.01" inputmode="decimal" value="${S.settings.buffer}"></div>
     </div>
-    <button class="primary wfull mt10" id="saveChk">Update balance</button>
+    <button class="primary wfull mt10" id="saveChk">Update balance</button></details>
+    <details class="finance-help"><summary>How this estimate works</summary>
+      <p class="note">${st.np && hasBalance ? `Checking ${money(S.settings.checking)} − bills due before payday ${money(st.due)} − ${money(S.settings.buffer)} buffer.` : 'Enter a checking balance, paycheck amount, pay days and scheduled bills to enable this estimate.'}</p>
+      <p class="note">Manual purchases track spending caps only; they do not adjust checking or imported cash flow. Update checking from your account. A balance dated today is assumed to include today's paycheck and rent; add an unpaid same-day item in Bills.</p>
+      <button class="small mt8" data-go="bills">Set income & bills</button></details>
   </div>
+  ${vQuickPurchase()}
+  ${vStoragePanel()}
   <div class="panel">
     ${row('Lowest forecast in next 45 days', hasBalance ? (lowRow ? fmt(lowRow.date) + ' after ' + esc(lowRow.name) : 'No scheduled changes') : 'Enter a checking balance first', `<div class="amt">${hasBalance ? money(low) : '—'}</div>`)}
     ${row('Purchases in caps this month', cap > 0 ? `Configured caps total ${money(cap)}; zero means unset` : 'No spending caps configured yet', `<div class="amt">${cash(spent)}</div>`)}
@@ -155,18 +165,36 @@ function vToday() {
   ${vSourceSummary()}
   <h2>Next 14 days</h2>
   <div class="panel">${tl.filter(r => daysUntil(r.date) <= 14).map(r => timelineRow(r)).join('') || '<div class="tiny">Nothing scheduled.</div>'}</div>
-  ${vUpcomingRecurring()}
-  <div class="panel">
-    <div class="n">Quick add a purchase</div>
+  ${vUpcomingRecurring()}`;
+}
+
+function vQuickPurchase() {
+  return `<div class="panel quick-purchase">
+    <h2>Quick add a purchase</h2>
     <div class="grid2 mt6">
-      <input id="qa" type="number" inputmode="decimal" placeholder="Amount" aria-label="Amount">
+      <input id="qa" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Amount" aria-label="Amount">
       <select id="qc" aria-label="Category">${cats().map(c => `<option>${esc(c)}</option>`).join('')}</select>
     </div>
-    <input id="qn" class="mt8" placeholder="What was it? (optional)" aria-label="What was it">
+    <input id="qn" class="mt8" maxlength="120" placeholder="What was it? (optional)" aria-label="What was it">
+    <details class="purchase-options"><summary>Date & account</summary>
     <div class="grid2"><div><label for="qd">Date</label><input id="qd" type="date" value="${today()}"></div><div><label for="qw">Account (optional)</label><input id="qw" maxlength="120" placeholder="Account label"></div></div>
-    <p class="note">For spending caps only. Later imports may include the same purchase; remove one cap entry if duplicated.</p>
-    <button class="primary wfull mt8" id="qadd">Log it</button>
+    </details>
+    <p class="note">Tracks spending caps; checking stays unchanged.</p>
+    <button class="primary wfull mt8" id="qadd">Log purchase</button>
+    ${canImport() ? '<details class="finance-help"><summary>About imported purchases</summary><p class="note">Later imports may include the same purchase. Remove one cap entry if duplicated.</p></details>' : ''}
   </div>`;
+}
+
+function vStoragePanel() {
+  const browser = capabilities.storage === 'browser';
+  if (!browser && !capabilities.backup) return '';
+  const backup = capabilities.backup && typeof api.exportBackup === 'function' && typeof api.restoreBackup === 'function';
+  return `<details class="panel storage-panel"><summary>Data & backups</summary>
+    <p class="note">Saved on this device. There is no automatic sync with other devices.</p>
+    ${browser ? '<p class="note">Clearing browser data erases these records. Export a backup regularly and before switching browsers or devices.</p>' : ''}
+    ${backup ? '<div class="button-row mt12"><button id="backupExport" class="primary">Export backup</button><button id="backupRestore">Restore backup</button></div><p class="note">Backups contain your financial records. Keep the downloaded file somewhere private.</p>' : ''}
+    ${browser && typeof api.requestPersistence === 'function' ? '<button class="small mt10" id="requestStorage">Keep browser storage</button><p class="tiny">Asks the browser to retain data when space is low. It does not prevent manual clearing.</p>' : ''}
+  </details>`;
 }
 
 function vBills() {
@@ -238,14 +266,14 @@ function vSpend() {
   }).join('')}</div>
   ${vTransactionEditor()}
   <h2>${monthLabel(m)} · ${txns.length.toLocaleString()} purchases</h2>
-  <div class="panel">${txns.slice(0, 200).map(t => `<div class="row"><div class="l"><div class="n">${esc(t.note || t.cat)}</div><div class="d">${fmt(t.date)} · ${esc(t.cat)}${t.who ? ' · ' + esc(t.who) : ''}</div><div class="button-row mt6"><button class="small" data-edit-txn="${esc(t.id)}">Edit cap entry</button><button class="small" data-del="${esc(t.id)}">Remove from caps</button></div></div><div class="amt">${cash(t.amt)}</div></div>`).join('') || '<div class="tiny">No purchases recorded for this month. Add one on Today or import a Monarch CSV.</div>'}${txns.length > 200 ? '<p class="note">Showing the newest 200. Search the full imported history in Cash flow.</p>' : ''}</div>
+  <div class="panel">${txns.slice(0, 200).map(t => `<div class="row"><div class="l"><div class="n">${esc(t.note || t.cat)}</div><div class="d">${fmt(t.date)} · ${esc(t.cat)}${t.who ? ' · ' + esc(t.who) : ''}</div><div class="button-row mt6"><button class="small" data-edit-txn="${esc(t.id)}">Edit cap entry</button><button class="small" data-del="${esc(t.id)}">Remove from caps</button></div></div><div class="amt">${cash(t.amt)}</div></div>`).join('') || `<div class="tiny">No purchases recorded for this month. Add one on Today${canImport() ? ' or import a Monarch CSV' : ''}.</div>`}${txns.length > 200 ? '<p class="note">Showing the newest 200. Search the full imported history in Cash flow.</p>' : ''}</div>
   ${vRecurring()}
-  <h2>Import from Monarch</h2>
+  ${canImport() ? `<h2>Import from Monarch</h2>
   <div class="panel">
     <p class="tiny pnote">In Monarch: Transactions → Download CSV. The complete ledger keeps income, expenses, payments, and transfers; eligible purchases and refunds also appear in caps. Reimported rows are deduplicated.</p>
     <button class="primary wfull" id="imp">Choose Monarch CSV…</button>
     <p class="note">${S.txns.length.toLocaleString()} purchases saved in total.</p>
-  </div>`;
+  </div>` : ''}`;
 }
 
 function vTransactionEditor() {
@@ -286,13 +314,12 @@ function vMonarch() {
   const dates = all.map(t => t.date).sort(), imports = [...(m.imports || [])].sort((a, b) => b.date.localeCompare(a.date));
   const sourcePanel = `<details class="panel"><summary>Data coverage & updates</summary>
   <div class="panel"><div class="n">${all.length.toLocaleString()} transactions imported</div>
-    <p class="note">${dates.length ? `${dateLabel(dates[0])}–${dateLabel(dates[dates.length - 1])}. This is the observed date span; it does not guarantee every day or account is complete.` : 'Import a transaction CSV to calculate cash flow. Account snapshots and recurring items alone do not establish income or spending.'}</p>
+    <p class="note">${dates.length ? `${dateLabel(dates[0])}–${dateLabel(dates[dates.length - 1])}. This is the observed date span; it does not guarantee every day or account is complete.` : canImport() ? 'Import a transaction CSV to calculate cash flow. Account snapshots and recurring items alone do not establish income or spending.' : 'No imported cash-flow history on this device. Manual purchases appear in Spend; they do not populate this view.'}</p>
     ${m.observedAt ? `<p class="note">Account / recurring snapshot observed ${dateLabel(m.observedAt)}.</p>` : ''}
     ${m.notes ? `<p class="note">${esc(m.notes)}</p>` : ''}
-    <div class="grid2 mt10"><button class="primary" id="imp">Import transaction CSV…</button><button id="impSnapshot">Import account snapshot…</button></div>
-    <p class="note">Local imports only. This does not maintain a live connection to Monarch. Snapshots do not change your plan until you apply a balance.</p>
+    ${canImport() ? '<div class="grid2 mt10"><button class="primary" id="imp">Import transaction CSV…</button><button id="impSnapshot">Import account snapshot…</button></div><p class="note">Local imports only. This does not maintain a live connection to Monarch. Snapshots do not change your plan until you apply a balance.</p>' : '<p class="note">CSV and account-snapshot imports are available in the desktop app. Devices do not sync automatically.</p>'}
     ${importReport ? `<p class="note import-report" role="status">${esc(importReport)}</p>` : ''}
-    <details><summary>Import history & format</summary><p class="note">Export transactions from Monarch → Transactions → Download CSV. A snapshot JSON can contain accounts and recurring items; it is separate from transaction history.</p>${imports.slice(0, 8).map(i => `<div class="row"><div class="l"><div class="n">${esc(i.source || 'Monarch CSV')}</div><div class="d">Imported ${dateLabel(i.date)} · ${i.valid || 0} valid rows${i.from && i.to ? ` · ${dateLabel(i.from)}–${dateLabel(i.to)}` : ''}</div><div class="d">${i.added || 0} ledger entries added · ${i.duplicates || 0} already present${i.invalid ? ` · ${i.invalid} invalid rows` : ''}</div></div></div>`).join('') || '<p class="note">No transaction imports recorded.</p>'}</details>
+    <details><summary>Import history</summary>${canImport() ? '<p class="note">Export transactions from Monarch → Transactions → Download CSV. A snapshot JSON can contain accounts and recurring items; it is separate from transaction history.</p>' : ''}${imports.slice(0, 8).map(i => `<div class="row"><div class="l"><div class="n">${esc(i.source || 'Monarch CSV')}</div><div class="d">Imported ${dateLabel(i.date)} · ${i.valid || 0} valid rows${i.from && i.to ? ` · ${dateLabel(i.from)}–${dateLabel(i.to)}` : ''}</div><div class="d">${i.added || 0} ledger entries added · ${i.duplicates || 0} already present${i.invalid ? ` · ${i.invalid} invalid rows` : ''}</div></div></div>`).join('') || '<p class="note">No transaction imports recorded.</p>'}</details>
   </div>
   </details>`;
   return `<h1>Cash flow</h1><p class="sub">See what came in, what went out, and what's changing.</p>
@@ -445,6 +472,30 @@ function wire() {
   const on = (sel, ev, fn) => document.querySelectorAll(sel).forEach(el => el.addEventListener(ev, fn));
   const num = sel => Number($(sel).value);
   on('#toYah', 'click', () => api.showYah().catch(error => toast(describe(error))));
+  on('#reloadState', 'click', loadState);
+  on('#retryLoad', 'click', loadState);
+  on('#backupExport', 'click', async e => {
+    const button = e.currentTarget; button.disabled = true;
+    try { await saving; const result = await api.exportBackup(); if (!result?.canceled) toast('Backup download started'); }
+    catch (error) { loadError = describe(error); render(); }
+    finally { button.disabled = false; }
+  });
+  on('#backupRestore', 'click', async e => {
+    const button = e.currentTarget; button.disabled = true;
+    try {
+      await saving; const result = await api.restoreBackup();
+      if (!result || result.canceled || !result.state) return;
+      S = result.state; loadError = null; billAction = null; editingTxn = null; importReport = null;
+      ledgerFilter.month = ledgerMonths()[0] || ''; render(); toast('Backup restored');
+    } catch (error) { loadError = describe(error); render(); }
+    finally { button.disabled = false; }
+  });
+  on('#requestStorage', 'click', async e => {
+    const button = e.currentTarget; button.disabled = true;
+    try { const result = await api.requestPersistence(); toast(result === true || result?.persisted ? 'Browser storage retention enabled. Keep backups too.' : 'Browser retention was not enabled. Keep exported backups.', 6000); }
+    catch (error) { toast(describe(error), 5000); }
+    finally { button.disabled = false; }
+  });
   on('[data-go]', 'click', e => { view = e.currentTarget.dataset.go; render(); window.scrollTo(0, 0); });
   on('#saveChk', 'click', () => { if (num('#buf') < 0) return toast('Buffer must be zero or more'); change(() => { setCheckingBalance(num('#chk') || 0, today()); S.settings.buffer = num('#buf') || 0; }, 'Balance updated'); });
   on('#qadd', 'click', () => { const a = num('#qa'); if (!(a > 0) || !$('#qd').value || !$('#qc').value) return toast('Enter a positive amount, date and category'); change(() => S.txns.push({ id: uid(), date: $('#qd').value, amt: a, cat: $('#qc').value, who: $('#qw').value.trim().slice(0, 120), note: $('#qn').value.slice(0, 120) }), 'Purchase saved to caps'); });
@@ -500,6 +551,14 @@ function wire() {
   document.querySelectorAll('[role=button]').forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } }));
 }
 
-api.getState().then(result => { S = result.state; loadError = result.loadError; capabilities = result.capabilities || {}; if (S) ledgerFilter.month = ledgerMonths()[0] || ''; render(); })
-  .catch(error => { loadError = describe(error); render(); });
+async function loadState() {
+  try {
+    await saving;
+    const result = await api.getState();
+    S = result.state; loadError = result.loadError; capabilities = result.capabilities || {};
+    if (S) ledgerFilter.month = ledgerMonths()[0] || '';
+    render();
+  } catch (error) { loadError = describe(error); render(); }
+}
+loadState();
 })();

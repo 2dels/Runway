@@ -11,6 +11,8 @@ const allowed = new Set([
   'src/finance-data.mjs', 'src/local-store.mjs', 'src/finance.html', 'src/finance.css', 'src/finance-ui.js',
   'src/preload.cjs', 'src/main.cjs', 'src/electron-extension.mjs', 'scripts/launch.mjs', 'scripts/check-release.mjs',
   'test/finance-data.test.mjs', 'test/local-store.test.mjs', 'test/electron-extension.test.mjs', 'test/smoke.mjs',
+  'src/finance-schema.mjs', 'src/browser-store.mjs', 'src/mobile-bridge.mjs', 'src/mobile.html', 'src/icon.svg',
+  'src/manifest.webmanifest', 'scripts/build-mobile.mjs', 'test/browser-store.test.mjs', 'test/mobile-smoke.mjs', 'docs/MOBILE.md',
 ]);
 let files;
 try {

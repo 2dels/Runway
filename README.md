@@ -1,6 +1,12 @@
 # Runway
 
-A local financial planning and debt freedom tool: checking and cash buffer, bills, spending caps, debt balances, and imported cash-flow history. Start from an empty plan and supply your own numbers.
+A local financial planning and debt freedom tool: checking and cash buffer, bills, spending caps, debt balances, and imported cash-flow history. Start from an empty plan and supply your own numbers. Runway includes a dark mobile web app and an optional desktop ARCHi adapter.
+
+## Use on a phone
+
+The mobile app opens in dark mode and saves your plan in this browser's device storage. Add purchases, update checking, track bills/cards/debt, and set goals. A home-screen installation and offline shell are included. See [docs/MOBILE.md](docs/MOBILE.md) for installation, hosting, and backup instructions.
+
+Phone records do not automatically sync with desktop ARCHi. Use **Data & backups** to export a backup or restore a full Runway backup/desktop `finance.json` file you choose. A restore replaces this device's plan after confirmation. Bank CSV imports remain a desktop feature; imported history already in a restored plan can be viewed on the phone.
 
 Runway is an independent optional extension for Electron hosts such as ARCHi. It includes a reusable backend, a financial interface, an Electron host adapter, and a standalone launcher. This repository does not modify or require a fork of ARCHi. ARCHi currently has no automatic extension loader: using the adapter inside a host requires the small integration described in [docs/ARCHI-INTEGRATION.md](docs/ARCHI-INTEGRATION.md). Downloading this repository alone does not install a button in an existing ARCHi application.
 
@@ -15,7 +21,7 @@ npm ci
 npm start
 ```
 
-If Electron's binary was skipped during dependency installation, run `npm run setup` once. Dependency installation downloads development/runtime packages; the running application uses no cloud service or bank connection. Windows is the tested desktop target. No installer, Android client, voice interface, or sync service is included in this first release.
+If Electron's binary was skipped during dependency installation, run `npm run setup` once. Dependency installation downloads development/runtime packages; financial records are not sent to a cloud service or bank connection. Windows is the tested desktop target. The mobile version is a browser app, not a native Android APK. Voice and automatic sync are not included.
 
 ## Set up an empty plan
 
@@ -28,7 +34,7 @@ Use the plan/settings controls to enter your checking balance, its date, cash bu
 
 ## Your data
 
-The standalone launcher uses `~/.runway` (`%USERPROFILE%\.runway` on Windows). Financial records live in `finance.json`; a previous-save backup is kept separately as `finance.backup.json`. These files are plain local JSON, not encrypted. A host using the adapter must explicitly choose its own private data directory outside the source checkout. There is no automatic discovery, migration, upload, telemetry, or access to an existing ARCHi profile.
+The standalone launcher uses `~/.runway` (`%USERPROFILE%\.runway` on Windows). Financial records live in `finance.json`; a previous-save backup is kept separately as `finance.backup.json`. The mobile browser uses IndexedDB with a previous committed state and conflict checks between tabs. Neither storage is encrypted by Runway. A host using the adapter must explicitly choose its own private data directory outside the source checkout. There is no automatic discovery, migration, upload, telemetry, or access to an existing ARCHi profile.
 
 This Git repository contains application code, empty defaults, and explicitly synthetic test inputs. Financial records, exports, screenshots, runtime files, and local environment files are excluded. Do not commit your own records when customizing it. See [PRIVACY.md](PRIVACY.md) for the release boundary.
 
@@ -52,8 +58,10 @@ The backend validates records, serializes local writes, writes atomically, and r
 npm test
 npm run check:release
 npm run smoke
+npm run build:mobile
+npm run test:mobile
 ```
 
-Unit tests use synthetic data and temporary directories. The Electron smoke uses a disposable `.runtime` profile, exercises the actual interface, restarts the app, and checks isolation. Run it in a desktop session. CI runs the backend and release checks; the desktop smoke is a separate local check.
+Unit tests use synthetic data and temporary directories. The Electron smoke uses a disposable `.runtime` profile, exercises the actual interface, restarts the app, and checks isolation. Run it in a desktop session. The mobile smoke uses an isolated Chromium context and a local static server to test dark mobile layout, persistence, conflicts, backups, and offline use. CI runs backend, release, and mobile checks; the desktop smoke is a separate local check.
 
 Code is MIT licensed, with upstream attribution retained. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). No private artwork or financial exports are bundled.

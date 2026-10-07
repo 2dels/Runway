@@ -1,7 +1,7 @@
 {
   "id": "runway",
   "name": "Runway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local spending, cash planning, and debt freedom tools",
   "adapter": "./src/electron-extension.mjs",
   "backend": "./src/finance-data.mjs",

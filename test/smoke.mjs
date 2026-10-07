@@ -22,7 +22,7 @@ async function launch() {
   });
   page = await app.firstWindow(); page.setDefaultTimeout(30000);
   await page.waitForURL('runway://app/finance.html');
-  await page.waitForSelector('#saveChk');
+  await page.waitForSelector('#qa');
   assert.equal(path.resolve(await app.evaluate(({ app }) => app.getPath('userData'))), profile);
 }
 async function state() { return (await page.evaluate(() => window.runway.getState())).state; }
@@ -44,9 +44,11 @@ try {
   await page.screenshot({ path: path.join(root, '.runtime', 'runway-empty.png') });
   checks.push('empty local profile and honest first-run interface');
 
+  await page.locator('.balance-editor summary').click();
   await page.locator('#chk').fill('1234.50'); await page.locator('#buf').fill('150'); await page.locator('#saveChk').click();
   await saved('s.settings.checking === 1234.5');
   await page.locator('#qa').fill('12.50'); await page.locator('#qn').fill('Synthetic workshop purchase');
+  await page.locator('.purchase-options summary').click();
   await page.locator('#qw').fill('Example cash'); await page.locator('#qadd').click();
   await saved('s.txns.length === 1');
   assert.equal((await state()).settings.checking, 1234.5);
