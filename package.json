@@ -1,0 +1,23 @@
+{
+  "name": "@2dels/runway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local financial planning and debt freedom extension for ARCHi-compatible Electron hosts",
+  "main": "src/main.cjs",
+  "exports": {
+    ".": "./src/finance-data.mjs",
+    "./electron": "./src/electron-extension.mjs"
+  },
+  "files": ["src", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "extension.json"],
+  "license": "MIT",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node scripts/launch.mjs",
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/smoke.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "setup": "node node_modules/electron/install.js"
+  },
+  "devDependencies": { "electron": "44.4.3", "playwright": "1.62.1" }
+}

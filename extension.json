@@ -1,0 +1,12 @@
+{
+  "id": "runway",
+  "name": "Runway",
+  "version": "0.1.0",
+  "description": "Local spending, cash planning, and debt freedom tools",
+  "adapter": "./src/electron-extension.mjs",
+  "backend": "./src/finance-data.mjs",
+  "dataFile": "finance.json",
+  "capabilities": ["local-finance-storage", "user-selected-csv-import", "user-selected-json-import"],
+  "requiresHostAdapter": true,
+  "note": "Descriptive package metadata; ARCHi does not currently auto-discover this manifest."
+}
